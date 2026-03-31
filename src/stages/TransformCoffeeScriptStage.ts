@@ -6,6 +6,7 @@ import NodePatcher, { PatcherClass } from '../patchers/NodePatcher';
 import { Suggestion } from '../suggestions';
 import { logger } from '../utils/debug';
 import DecaffeinateContext from '../utils/DecaffeinateContext';
+import generateSourceMap from '../utils/generateSourceMap';
 import notNull from '../utils/notNull';
 import PatchError from '../utils/PatchError';
 
@@ -17,12 +18,14 @@ export default class TransformCoffeeScriptStage {
     log(content);
 
     const context = DecaffeinateContext.create(content, Boolean(options.useCS2));
-    const editor = new MagicString(content);
+    const editor = new MagicString(content, { filename: options.filename });
     const stage = new this(context.programNode, context, editor, options);
     const patcher = stage.build();
     patcher.patch();
+
     return {
       code: editor.toString(),
+      map: generateSourceMap(editor, options),
       suggestions: stage.suggestions,
     };
   }

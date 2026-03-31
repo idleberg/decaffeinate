@@ -1,7 +1,7 @@
 import assert from 'assert';
 import { readdir, readFile, stat, writeFile } from 'mz/fs';
 import { basename, dirname, extname, join } from 'path';
-import { convert, modernizeJS } from './index';
+import { convert, modernizeJS, SourceMap } from './index';
 import { DEFAULT_OPTIONS, Options } from './options';
 import PatchError from './utils/PatchError';
 
@@ -53,6 +53,7 @@ interface CLIOptions {
   readonly modernizeJS: boolean;
   readonly version: boolean;
   readonly help: boolean;
+  readonly sourceMap: boolean;
 }
 
 interface ParseOptionsError {
@@ -66,6 +67,7 @@ function parseArguments(args: ReadonlyArray<string>, io: IO): ParseOptionsResult
   let modernizeJS = false;
   let help = false;
   let version = false;
+  let sourceMap = false;
 
   for (let i = 2; i < args.length; i++) {
     const arg = args[i];
@@ -182,6 +184,11 @@ function parseArguments(args: ReadonlyArray<string>, io: IO): ParseOptionsResult
         baseOptions.nullishCoalescing = true;
         break;
 
+      case '--source-map':
+        sourceMap = true;
+        baseOptions.sourceMap = true;
+        break;
+
       default:
         if (arg.startsWith('-')) {
           return { kind: 'error', message: `unrecognized option: ${arg}` };
@@ -195,7 +202,7 @@ function parseArguments(args: ReadonlyArray<string>, io: IO): ParseOptionsResult
     return { kind: 'error', message: 'cannot use --use-js-modules with --no-bare' };
   }
 
-  return { kind: 'success', paths, baseOptions, modernizeJS, version, help };
+  return { kind: 'success', paths, baseOptions, modernizeJS, version, help, sourceMap };
 }
 
 /**
@@ -241,12 +248,18 @@ async function runWithPaths(paths: Array<string>, options: CLIOptions, io: IO): 
   async function processFile(path: string): Promise<boolean> {
     const extension = path.endsWith('.coffee.md') ? '.coffee.md' : extname(path);
     const outputPath = join(dirname(path), basename(path, extension)) + '.js';
+    const mapPath = outputPath + '.map';
     io.stdout.write(`${path} → ${outputPath}\n`);
     const data = await readFile(path, 'utf8');
-    const resultCode = runWithCode(path, data, options, io);
-    const success = typeof resultCode === 'string';
-    if (success) {
-      await writeFile(outputPath, resultCode);
+    const result = runWithResult(path, data, options, io);
+    const success = result !== undefined;
+    if (success && result !== undefined) {
+      let { code } = result;
+      if (result.map) {
+        await writeFile(mapPath, JSON.stringify(result.map));
+        code += `\n//# sourceMappingURL=${basename(mapPath)}`;
+      }
+      await writeFile(outputPath, code);
     }
     return success;
   }
@@ -265,10 +278,10 @@ async function runWithStdio(options: CLIOptions, io: IO): Promise<boolean> {
     let data = '';
     io.stdin.on('data', (chunk) => (data += chunk));
     io.stdin.on('end', () => {
-      const resultCode = runWithCode('stdin', data, options, io);
-      const success = typeof resultCode === 'string';
-      if (success) {
-        io.stdout.write(resultCode);
+      const result = runWithResult('stdin', data, options, io);
+      const success = result !== undefined;
+      if (success && result !== undefined) {
+        io.stdout.write(result.code);
       }
       resolve(success);
     });
@@ -276,15 +289,20 @@ async function runWithStdio(options: CLIOptions, io: IO): Promise<boolean> {
 }
 
 /**
- * Run decaffeinate on the given code string and return the resulting code.
+ * Run decaffeinate on the given code string and return the result.
  */
-function runWithCode(name: string, code: string, options: CLIOptions, io: IO): string | undefined {
+function runWithResult(
+  name: string,
+  code: string,
+  options: CLIOptions,
+  io: IO,
+): { code: string; map?: SourceMap } | undefined {
   const baseOptions = Object.assign({ filename: name }, options.baseOptions);
   try {
     if (options.modernizeJS) {
-      return modernizeJS(code, baseOptions).code;
+      return modernizeJS(code, baseOptions);
     } else {
-      return convert(code, baseOptions).code;
+      return convert(code, baseOptions);
     }
   } catch (err: unknown) {
     assert(err instanceof Error);
@@ -348,6 +366,8 @@ function usage(exe: string, out: NodeJS.WritableStream): void {
   out.write('                           match exactly.\n');
   out.write('  --logical-assignment     Use the ES2021 logical assignment operators `&&=`, `||=`,\n');
   out.write('                           and `??=`.\n');
+  out.write('  --source-map             Generate a .js.map sourcemap file alongside each output\n');
+  out.write('                           .js file, mapping back to the original .coffee source.\n');
   out.write('\n');
   out.write('EXAMPLES\n');
   out.write('\n');

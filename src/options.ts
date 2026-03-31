@@ -20,6 +20,7 @@ export interface Options {
   logicalAssignment?: boolean;
   nullishCoalescing?: boolean;
   bare?: boolean;
+  sourceMap?: boolean;
 }
 
 export const DEFAULT_OPTIONS: Options = {
@@ -44,6 +45,7 @@ export const DEFAULT_OPTIONS: Options = {
   logicalAssignment: false,
   nullishCoalescing: false,
   bare: true,
+  sourceMap: false,
 };
 
 export function resolveOptions(options: Options): Options {

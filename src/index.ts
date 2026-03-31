@@ -1,3 +1,4 @@
+import remapping, { type EncodedSourceMap } from '@jridgewell/remapping';
 import { lex } from 'coffee-lex';
 import { nodes as getCoffee1Nodes, tokens as getCoffee1Tokens } from 'decaffeinate-coffeescript';
 import { nodes as getCoffee2Nodes, tokens as getCoffee2Tokens } from 'decaffeinate-coffeescript2';
@@ -26,12 +27,24 @@ import notNull from './utils/notNull';
 import assert from 'assert';
 export { PatchError };
 
+export interface SourceMap {
+  version: number;
+  file?: string | null;
+  sourceRoot?: string;
+  sources: Array<string | null>;
+  sourcesContent?: Array<string | null>;
+  names: Array<string>;
+  mappings: string;
+}
+
 export interface ConversionResult {
   code: string;
+  map?: SourceMap;
 }
 
 export interface StageResult {
   code: string;
+  map?: SourceMap;
   suggestions: Array<Suggestion>;
 }
 
@@ -82,6 +95,7 @@ export function convert(source: string, options: Options = {}): ConversionResult
   result.code = convertNewlines(result.code, originalNewlineStr);
   return {
     code: options.bare ? result.code : `(function() {\n${result.code}\n}).call(this);`,
+    map: result.map,
   };
 }
 
@@ -95,18 +109,33 @@ export function modernizeJS(source: string, options: Options = {}): ConversionRe
   result.code = convertNewlines(result.code, originalNewlineStr);
   return {
     code: options.bare ? result.code : `(function() {\n${result.code}\n}).call(this);`,
+    map: result.map,
   };
 }
 
 function runStages(initialContent: string, options: Options, stages: Array<Stage>): StageResult {
   let content = initialContent;
   const suggestions: Array<Suggestion> = [];
-  stages.forEach((stage) => {
-    const { code, suggestions: stageSuggestions } = runStage(stage, content, options);
+  const maps: Array<SourceMap> = [];
+
+  for (const stage of stages) {
+    const { code, map, suggestions: stageSuggestions } = runStage(stage, content, options);
     content = code;
     suggestions.push(...stageSuggestions);
-  });
-  return { code: content, suggestions: mergeSuggestions(suggestions) };
+    if (map) {
+      maps.push(map);
+    }
+  }
+
+  // Compose all per-stage maps into one map from final output → original source.
+  // remapping expects maps in reverse order (last stage first).
+  // JSON round-trip ensures mappings are encoded as a VLQ string.
+  const composedMap =
+    options.sourceMap && maps.length > 0
+      ? (JSON.parse(remapping(maps.slice().reverse() as Array<EncodedSourceMap>, () => null).toString()) as SourceMap)
+      : undefined;
+
+  return { code: content, map: composedMap, suggestions: mergeSuggestions(suggestions) };
 }
 
 function runStage(stage: Stage, content: string, options: Options): StageResult {
