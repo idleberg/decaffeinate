@@ -1,5 +1,5 @@
 import { equal, ok } from 'assert';
-import { existsSync, readFileSync } from 'fs';
+import { existsSync, readFileSync, unlinkSync } from 'fs';
 import { copySync } from 'fs-extra';
 import { join } from 'path';
 import { PassThrough } from 'stream';
@@ -582,5 +582,56 @@ describe('decaffeinate CLI', () => {
     `,
       1,
     );
+  });
+
+  describe('--source-map', () => {
+    it('generates a .js.map file alongside the .js output', async () => {
+      await runCli(
+        ['./test_fixtures/A.coffee', '--source-map'],
+        '',
+        `
+        ./test_fixtures/A.coffee → test_fixtures/A.js
+      `,
+      );
+      ok(existsSync('test_fixtures/A.js'));
+      ok(existsSync('test_fixtures/A.js.map'));
+
+      const jsContent = readFileSync('test_fixtures/A.js', 'utf8');
+      expect(jsContent).toContain('//# sourceMappingURL=A.js.map');
+
+      const mapContent = JSON.parse(readFileSync('test_fixtures/A.js.map', 'utf8'));
+      expect(mapContent.version).toBe(3);
+      expect(mapContent.mappings).toBeTruthy();
+
+      // Clean up the map file
+      unlinkSync('test_fixtures/A.js.map');
+    });
+
+    it('does not generate a .js.map file without --source-map', async () => {
+      await runCli(
+        ['./test_fixtures/A.coffee'],
+        '',
+        `
+        ./test_fixtures/A.coffee → test_fixtures/A.js
+      `,
+      );
+      ok(existsSync('test_fixtures/A.js'));
+      expect(existsSync('test_fixtures/A.js.map')).toBe(false);
+
+      const jsContent = readFileSync('test_fixtures/A.js', 'utf8');
+      expect(jsContent).not.toContain('sourceMappingURL');
+    });
+
+    it('does not emit sourcemap for stdin mode', async () => {
+      await runCli(
+        ['--source-map'],
+        `
+        x = 1
+      `,
+        `
+        const x = 1;
+      `,
+      );
+    });
   });
 });
