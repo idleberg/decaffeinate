@@ -65,6 +65,7 @@
     "@babel/types": "^7.12.6",
     "@codemod/core": "^2.0.1",
     "@codemod/parser": "^1.2.1",
+    "@jridgewell/remapping": "^2.3.5",
     "@resugar/codemod-declarations-block-scope": "^1.0.3",
     "@resugar/codemod-functions-arrow": "^1.0.2",
     "@resugar/codemod-modules-commonjs": "^1.0.5",
